@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sticky Notes Grid — 3×3 in (Markdown + Print)</title>
+  <!--
+    How to use
+    1) Type in Edit mode using Markdown. Switch to Preview to see rendered notes.
+    2) Use the Layout controls to fine‑tune top/left offsets and gaps for your printer & template.
+    3) Toggle "Show print guides" if you want light borders while aligning your laminated grid.
+    4) Print (Ctrl/Cmd+P). This page enforces US Letter (8.5 × 11 in) and 3 × 3 in notes.
+
+    Notes
+    • All measurements use real CSS inches to maintain accurate sizes when printing.
+    • Content is stored locally in your browser (localStorage).
+    • This is a single‑file static page suitable for GitHub Pages.
+  -->
+  <style>
+    :root {
+      /* Default layout variables (can be overridden by controls) */
+      --page-width: 8.5in;
+      --page-height: 11in;
+      --cols: 2;            /* 2 columns of 3in fits 8.5in page width */
+      --rows: 3;            /* 3 rows of 3in fits 11in page height */
+      --note-size: 3in;     /* Sticky note side */
+      --gap-x: 0.25in;      /* Horizontal gap between notes */
+      --gap-y: 0.5in;       /* Vertical gap between notes */
+      --margin-left: 0.5in; /* Left page margin for alignment */
+      --margin-top: 0.5in;  /* Top page margin for alignment */
+      --note-padding: 0.18in;
+      --guide-color: #cbd5e1;  /* slate-300 */
+      --ui-accent: #2563eb;    /* blue-600 */
+      --ui-bg: #0b1020;        /* dark bg for better focus */
+      --ui-surface: #111827;   /* gray-900 */
+      --ui-text: #e5e7eb;      /* gray-200 */
+      --ui-muted: #9ca3af;     /* gray-400 */
+      --font-stack: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: var(--font-stack);
+      color: var(--ui-text);
+      background: radial-gradient(1200px 800px at 20% 0%, #111827 0%, #0b1020 55%, #05070f 100%);
+    }
+
+    /* Top control bar */
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(8px);
+      background: rgba(17, 24, 39, 0.8);
+      border-bottom: 1px solid #1f2937;
+      padding: 0.6rem 0.9rem;
+      display: grid;
+      gap: 0.6rem;
+      grid-template-columns: 1fr auto;
+    }
+    .toolbar .left, .toolbar .right {
+      display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;
+    }
+    .toolbar h1 { font-size: 1rem; font-weight: 600; margin: 0 0.6rem 0 0; color: #f3f4f6; }
+    .toolbar .sep { width: 1px; height: 24px; background: #1f2937; margin: 0 0.25rem; }
+    .toolbar label { font-size: 0.85rem; color: var(--ui-muted); }
+    .toolbar input[type="number"], .toolbar select, .toolbar input[type="text"] {
+      background: #0b1220; color: #e5e7eb; border: 1px solid #243142; border-radius: 8px;
+      padding: 0.35rem 0.5rem; outline: none; min-width: 4.5rem;
+    }
+    .toolbar input[type="checkbox"] { transform: translateY(1px); }
+    .btn {
+      background: var(--ui-accent); color: white; border: none; border-radius: 8px; padding: 0.45rem 0.7rem; font-weight: 600;
+      cursor: pointer; box-shadow: 0 0 0 0 rgba(37,99,235,0.0); transition: box-shadow 200ms ease, transform 120ms ease;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn.secondary { background: #374151; }
+
+    /* Page area matching US Letter */
+    .sheet {
+      width: var(--page-width);
+      height: var(--page-height);
+      margin: 1rem auto;
+      background: #0a0d16;
+      border: 1px solid #1f2937;
+      border-radius: 12px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+    }
+
+    /* Grid container positioned by margins */
+    .grid {
+      position: absolute;
+      left: var(--margin-left);
+      top: var(--margin-top);
+      display: grid;
+      grid-template-columns: repeat(var(--cols), var(--note-size));
+      grid-template-rows: repeat(var(--rows), var(--note-size));
+      gap: var(--gap-y) var(--gap-x); /* row-gap col-gap order for print engines */
+      /* Draw optional guides via background gradient (only if body has .print-guides) */
+    }
+
+    body.print-guides .note {
+      outline: 0.7pt dashed var(--guide-color);
+      outline-offset: 0;
+    }
+
+    .note {
+      width: var(--note-size);
+      height: var(--note-size);
+      background: white; /* white substrate; printer will only put ink where content exists */
+      color: #111827;
+      border-radius: 0.05in; /* a slight rounding looks nice */
+      padding: var(--note-padding);
+      display: grid;
+      grid-template-rows: 1fr;
+      position: relative;
+    }
+
+    .note textarea, .note .preview {
+      width: 100%; height: 100%; border: none; outline: none; margin: 0; padding: 0;
+      font: 12pt/1.25 Georgia, "Times New Roman", serif; /* readable print font */
+      background: transparent; color: inherit; resize: none;
+      overflow: auto;
+    }
+
+    .note .preview { overflow-wrap: break-word; }
+    .note .preview h1 { font-size: 1.3em; margin: 0 0 0.2em; }
+    .note .preview h2 { font-size: 1.15em; margin: 0.1em 0; }
+    .note .preview h3 { font-size: 1em; margin: 0.1em 0; }
+    .note .preview p { margin: 0 0 0.35em; }
+    .note .preview ul, .note .preview ol { margin: 0.2em 0 0.35em 1em; }
+    .note .preview code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; }
+
+    .mode-indicator {
+      display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--ui-muted);
+    }
+    .pill { padding: 0.2rem 0.5rem; border-radius: 999px; background: #0b1220; border: 1px solid #243142; color: #c9d3e0; font-weight: 600; }
+
+    .footer {
+      max-width: var(--page-width);
+      margin: 0.25rem auto 1.5rem; opacity: 0.7; font-size: 0.85rem; text-align: center;
+      color: var(--ui-muted);
+    }
+
+    /* Print styles */
+    @page { size: Letter; margin: 0; }
+    @media print {
+      body { background: white; }
+      .toolbar, .footer { display: none !important; }
+      .sheet { width: 8.5in; height: 11in; margin: 0; border: none; border-radius: 0; box-shadow: none; }
+      /* Force preview rendering in print */
+      .note textarea { display: none !important; }
+      .note .preview { display: block !important; }
+      /* Optional: print guides only if .print-guides is set on body (handled pre-print) */
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div class="left">
+      <h1>Sticky Notes Grid</h1>
+      <span class="mode-indicator">Mode: <span id="modePill" class="pill">Edit (Markdown)</span></span>
+      <div class="sep"></div>
+      <label>Top (in)
+        <input id="topInput" type="number" step="0.01" min="0" value="0.5">
+      </label>
+      <label>Left (in)
+        <input id="leftInput" type="number" step="0.01" min="0" value="0.5">
+      </label>
+      <label>Gap X (in)
+        <input id="gapXInput" type="number" step="0.01" min="0" value="0.25">
+      </label>
+      <label>Gap Y (in)
+        <input id="gapYInput" type="number" step="0.01" min="0" value="0.50">
+      </label>
+      <label><input id="guidesToggle" type="checkbox"> Show print guides</label>
+    </div>
+    <div class="right">
+      <button id="modeBtn" class="btn" title="Toggle Edit/Preview (E)">Toggle Preview (E)</button>
+      <button id="clearBtn" class="btn secondary" title="Clear all notes">Clear</button>
+      <button id="printBtn" class="btn" title="Print (Ctrl/Cmd+P)">Print</button>
+    </div>
+  </div>
+
+  <main class="sheet">
+    <section id="grid" class="grid" aria-label="3x3 inch sticky notes grid">
+      <!-- Notes will be injected here -->
+    </section>
+  </main>
+
+  <div class="footer">3×3 inch notes on US Letter (8.5×11 in). Content saves automatically to your browser.</div>
+
+  <!-- Marked (Markdown parser) and DOMPurify (sanitizer) from CDNs. These can be swapped for local copies if desired. -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" integrity="sha256-0A9GQf/7iZj9nYw2r6Qx2m0gN1Lk6jR4l5hS9oQbJXg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" integrity="sha256-+nqkLk9qE0f1g9z7c2T7w0C3+Qh9c1nJxIhS9d3kGgY=" crossorigin="anonymous"></script>
+
+  <script>
+    (function() {
+      const COLS = 2;  // fixed to guarantee fit on Letter width
+      const ROWS = 3;  // fixed to guarantee fit on Letter height
+      const NOTE_COUNT = COLS * ROWS; // 6 notes per page
+      const STORAGE_KEY = 'sticky-notes-v1';
+      const SETTINGS_KEY = 'sticky-notes-settings-v1';
+
+      const grid = document.getElementById('grid');
+      const modeBtn = document.getElementById('modeBtn');
+      const modePill = document.getElementById('modePill');
+      const clearBtn = document.getElementById('clearBtn');
+      const printBtn = document.getElementById('printBtn');
+      const topInput = document.getElementById('topInput');
+      const leftInput = document.getElementById('leftInput');
+      const gapXInput = document.getElementById('gapXInput');
+      const gapYInput = document.getElementById('gapYInput');
+      const guidesToggle = document.getElementById('guidesToggle');
+
+      let editMode = true; // default to edit mode
+
+      // Load prior settings
+      const defaultSettings = { top: 0.5, left: 0.5, gapX: 0.25, gapY: 0.5, guides: false };
+      let settings = { ...defaultSettings };
+      try { const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)); if (saved) settings = { ...settings, ...saved }; } catch {}
+
+      // Apply settings to inputs
+      topInput.value = settings.top;
+      leftInput.value = settings.left;
+      gapXInput.value = settings.gapX;
+      gapYInput.value = settings.gapY;
+      guidesToggle.checked = !!settings.guides;
+
+      function applySettingsToCSS() {
+        document.documentElement.style.setProperty('--margin-top', settings.top + 'in');
+        document.documentElement.style.setProperty('--margin-left', settings.left + 'in');
+        document.documentElement.style.setProperty('--gap-x', settings.gapX + 'in');
+        document.documentElement.style.setProperty('--gap-y', settings.gapY + 'in');
+        document.body.classList.toggle('print-guides', !!settings.guides);
+      }
+
+      function persistSettings() {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      }
+
+      function setMode(isEdit) {
+        editMode = isEdit;
+        modePill.textContent = isEdit ? 'Edit (Markdown)' : 'Preview (Rendered)';
+        const notes = grid.querySelectorAll('.note');
+        notes.forEach(note => {
+          const ta = note.querySelector('textarea');
+          const pv = note.querySelector('.preview');
+          if (isEdit) {
+            ta.style.display = 'block';
+            pv.style.display = 'none';
+            ta.focus();
+          } else {
+            ta.style.display = 'none';
+            pv.style.display = 'block';
+            // Render markdown
+            const raw = ta.value || '';
+            const html = DOMPurify.sanitize(marked.parse(raw));
+            pv.innerHTML = html;
+          }
+        });
+      }
+
+      function createNote(index, initialText = '') {
+        const note = document.createElement('article');
+        note.className = 'note';
+        note.dataset.index = String(index);
+        const ta = document.createElement('textarea');
+        ta.placeholder = 'Markdown…';
+        ta.value = initialText;
+        ta.addEventListener('input', throttle(saveAll, 250));
+        const pv = document.createElement('div');
+        pv.className = 'preview';
+        note.appendChild(ta);
+        note.appendChild(pv);
+        return note;
+      }
+
+      function saveAll() {
+        const data = [];
+        grid.querySelectorAll('.note textarea').forEach(ta => data.push(ta.value));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      }
+
+      function loadAll() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return Array(NOTE_COUNT).fill('');
+          const arr = JSON.parse(raw);
+          if (!Array.isArray(arr)) return Array(NOTE_COUNT).fill('');
+          // Normalize length
+          const out = Array(NOTE_COUNT).fill('');
+          for (let i = 0; i < Math.min(arr.length, NOTE_COUNT); i++) out[i] = arr[i] || '';
+          return out;
+        } catch {
+          return Array(NOTE_COUNT).fill('');
+        }
+      }
+
+      function throttle(fn, wait) {
+        let t = 0; return function(...args) {
+          const now = Date.now();
+          if (now - t > wait) { t = now; fn.apply(this, args); }
+        };
+      }
+
+      // Build grid
+      function init() {
+        document.documentElement.style.setProperty('--cols', COLS);
+        document.documentElement.style.setProperty('--rows', ROWS);
+        const values = loadAll();
+        for (let i = 0; i < NOTE_COUNT; i++) {
+          grid.appendChild(createNote(i, values[i] || ''));
+        }
+        setMode(true);
+        applySettingsToCSS();
+      }
+
+      // Controls
+      modeBtn.addEventListener('click', () => setMode(!editMode));
+      clearBtn.addEventListener('click', () => {
+        if (confirm('Clear all notes? This cannot be undone.')) {
+          localStorage.removeItem(STORAGE_KEY);
+          grid.querySelectorAll('.note textarea').forEach(ta => ta.value = '');
+          saveAll();
+          if (!editMode) setMode(false); // re-render previews
+        }
+      });
+      printBtn.addEventListener('click', () => { window.print(); });
+
+      topInput.addEventListener('input', () => { settings.top = clampNum(+topInput.value, 0, 2); applySettingsToCSS(); persistSettings(); });
+      leftInput.addEventListener('input', () => { settings.left = clampNum(+leftInput.value, 0, 2); applySettingsToCSS(); persistSettings(); });
+      gapXInput.addEventListener('input', () => { settings.gapX = clampNum(+gapXInput.value, 0, 1.5); applySettingsToCSS(); persistSettings(); });
+      gapYInput.addEventListener('input', () => { settings.gapY = clampNum(+gapYInput.value, 0, 2); applySettingsToCSS(); persistSettings(); });
+      guidesToggle.addEventListener('change', () => { settings.guides = !!guidesToggle.checked; applySettingsToCSS(); persistSettings(); });
+
+      // Keyboard shortcut E to toggle mode
+      document.addEventListener('keydown', (e) => {
+        if (e.key.toLowerCase() === 'e' && !e.metaKey && !e.ctrlKey) { e.preventDefault(); setMode(!editMode); }
+      });
+
+      function clampNum(n, min, max) {
+        if (Number.isNaN(n)) return min; return Math.max(min, Math.min(max, n));
+      }
+
+      // Render previews when switching away from a note in edit mode (optional live preview while editing)
+      grid.addEventListener('input', (e) => {
+        if (!editMode) return;
+        const ta = e.target.closest && e.target.closest('.note')?.querySelector('textarea');
+        const pv = e.target.closest && e.target.closest('.note')?.querySelector('.preview');
+        if (ta && pv) { pv.innerHTML = DOMPurify.sanitize(marked.parse(ta.value || '')); }
+      });
+
+      // Initialize
+      init();
+    })();
+  </script>
+</body>
+</html>
