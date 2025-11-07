@@ -39,11 +39,14 @@
     .sheet { width: var(--page-width); height: var(--page-height); margin: 1rem auto; background: #0a0d16; border: 1px solid #1f2937; border-radius: 12px; position: relative; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
     .grid { position: absolute; left: var(--margin-left); top: var(--margin-top); display: grid; grid-template-columns: repeat(var(--cols), var(--note-size)); grid-template-rows: repeat(var(--rows), var(--note-size)); gap: var(--gap-y) var(--gap-x); }
     body.print-guides .note { outline: 0.7pt dashed var(--guide-color); outline-offset: 0; }
-    .note { width: var(--note-size); height: var(--note-size); background: white; color: #111827; border-radius: 0.05in; padding: var(--note-padding); display: grid; grid-template-rows: 1fr; position: relative; }
+    .note { width: var(--note-size); height: var(--note-size); background: white; color: #111827; border-radius: 0.05in; padding: var(--note-padding); display: grid; grid-template-rows: 1fr auto; position: relative; }
     .note textarea, .note .preview { width: 100%; height: 100%; border: none; outline: none; margin: 0; padding: 0; font: 12pt/1.25 Georgia, "Times New Roman", serif; background: transparent; color: inherit; resize: none; overflow: auto; }
     .note .preview { overflow-wrap: break-word; }
+    .error-msg { display: none; margin-top: 0.2rem; font-size: 10px; color: #991b1b; }
+    .note.error { border: 2px solid #ef4444; background: #fee2e2; }
+    .note.error .error-msg { display: block; }
     @page { size: Letter; margin: 0; }
-    @media print { body { background: white; } .toolbar { display: none !important; } .sheet { width: 8.5in; height: 11in; margin: 0; border: none; border-radius: 0; box-shadow: none; } .note textarea { display: none !important; } .note .preview { display: block !important; } }
+    @media print { body { background: white; } .toolbar { display: none !important; } .sheet { width: 8.5in; height: 11in; margin: 0; border: none; border-radius: 0; box-shadow: none; } .note textarea { display: none !important; } .note .preview { display: block !important; } .error-msg { display: none !important; } }
   </style>
 </head>
 <body>
@@ -54,6 +57,7 @@
       <label>Left <input id="leftInput" type="number" step="0.01" min="0" value="0.5"></label>
       <label>Gap X <input id="gapXInput" type="number" step="0.01" min="0" value="0.25"></label>
       <label>Gap Y <input id="gapYInput" type="number" step="0.01" min="0" value="0.50"></label>
+      <label>Min font (px) <input id="minFontInput" type="number" step="1" min="3" value="4"></label>
       <label><input id="guidesToggle" type="checkbox"> Show print guides</label>
     </div>
     <div class="right">
@@ -71,20 +75,129 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script>
     (function(){
-      const COLS=2,ROWS=3,NOTE_COUNT=COLS*ROWS,STORAGE_KEY='sticky-notes-v1';
+      const COLS=2,ROWS=3,NOTE_COUNT=COLS*ROWS,STORAGE_KEY='sticky-notes-v1',SETTINGS_KEY='sticky-notes-settings-v1';
       const grid=document.getElementById('grid'),modeBtn=document.getElementById('modeBtn'),clearBtn=document.getElementById('clearBtn'),printBtn=document.getElementById('printBtn');
-      const topInput=document.getElementById('topInput'),leftInput=document.getElementById('leftInput'),gapXInput=document.getElementById('gapXInput'),gapYInput=document.getElementById('gapYInput'),guidesToggle=document.getElementById('guidesToggle');
+      const topInput=document.getElementById('topInput'),leftInput=document.getElementById('leftInput'),gapXInput=document.getElementById('gapXInput'),gapYInput=document.getElementById('gapYInput'),guidesToggle=document.getElementById('guidesToggle'),minFontInput=document.getElementById('minFontInput');
       let editMode=true;
-      function applySettings(){document.documentElement.style.setProperty('--margin-top',topInput.value+'in');document.documentElement.style.setProperty('--margin-left',leftInput.value+'in');document.documentElement.style.setProperty('--gap-x',gapXInput.value+'in');document.documentElement.style.setProperty('--gap-y',gapYInput.value+'in');document.body.classList.toggle('print-guides',guidesToggle.checked);}
-      function createNote(i,text=''){const note=document.createElement('article');note.className='note';const ta=document.createElement('textarea');ta.value=text;const pv=document.createElement('div');pv.className='preview';note.append(ta,pv);return note;}
+
+      // Settings persistence
+      const defaultSettings={top:0.5,left:0.5,gapX:0.25,gapY:0.5,guides:false,minFontPx:4};
+      let settings={...defaultSettings};
+      try{const saved=JSON.parse(localStorage.getItem(SETTINGS_KEY)); if(saved) settings={...settings,...saved};}catch{}
+      topInput.value=settings.top; leftInput.value=settings.left; gapXInput.value=settings.gapX; gapYInput.value=settings.gapY; guidesToggle.checked=!!settings.guides; minFontInput.value=settings.minFontPx;
+
+      function applySettings(){
+        document.documentElement.style.setProperty('--margin-top',Number(topInput.value)+'in');
+        document.documentElement.style.setProperty('--margin-left',Number(leftInput.value)+'in');
+        document.documentElement.style.setProperty('--gap-x',Number(gapXInput.value)+'in');
+        document.documentElement.style.setProperty('--gap-y',Number(gapYInput.value)+'in');
+        document.body.classList.toggle('print-guides',guidesToggle.checked);
+        settings={top:Number(topInput.value),left:Number(leftInput.value),gapX:Number(gapXInput.value),gapY:Number(gapYInput.value),guides:!!guidesToggle.checked,minFontPx:parseInt(minFontInput.value,10)||4};
+        localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings));
+      }
+
+      function createNote(i,text=''){
+        const note=document.createElement('article');
+        note.className='note';
+        note.dataset.index=String(i);
+        // capture default font size once computed
+        const ta=document.createElement('textarea');
+        ta.value=text;
+        const pv=document.createElement('div'); pv.className='preview';
+        const err=document.createElement('div'); err.className='error-msg'; err.setAttribute('aria-live','polite');
+        note.append(ta,pv,err);
+        // after insertion, compute and store default font in px
+        queueMicrotask(()=>{
+          const cs=getComputedStyle(ta); const px=parseFloat(cs.fontSize)||16; note.dataset.defaultFontPx=String(px);
+        });
+        // scale on blur from textarea
+        ta.addEventListener('blur',()=>adjustNote(note));
+        return note;
+      }
+
       function saveAll(){const data=[];grid.querySelectorAll('textarea').forEach(t=>data.push(t.value));localStorage.setItem(STORAGE_KEY,JSON.stringify(data));}
       function loadAll(){try{const raw=JSON.parse(localStorage.getItem(STORAGE_KEY));return Array.isArray(raw)?raw:Array(NOTE_COUNT).fill('');}catch{return Array(NOTE_COUNT).fill('');}}
-      function setMode(isEdit){editMode=isEdit;grid.querySelectorAll('.note').forEach(n=>{const ta=n.querySelector('textarea'),pv=n.querySelector('.preview');if(isEdit){ta.style.display='block';pv.style.display='none';}else{ta.style.display='none';pv.style.display='block';pv.innerHTML=DOMPurify.sanitize(marked.parse(ta.value||''));}});}
-      function init(){const vals=loadAll();for(let i=0;i<NOTE_COUNT;i++){grid.appendChild(createNote(i,vals[i]));}setMode(true);applySettings();}
-      modeBtn.addEventListener('click',()=>setMode(!editMode));clearBtn.addEventListener('click',()=>{if(confirm('Clear all notes?')){localStorage.removeItem(STORAGE_KEY);grid.querySelectorAll('textarea').forEach(t=>t.value='');saveAll();if(!editMode)setMode(false);}});
-      printBtn.addEventListener('click',()=>window.print());[topInput,leftInput,gapXInput,gapYInput].forEach(inp=>inp.addEventListener('input',applySettings));guidesToggle.addEventListener('change',applySettings);
-      document.addEventListener('keydown',e=>{if(e.altKey&&e.key.toLowerCase()==='e'){e.preventDefault();setMode(!editMode);}});
-      grid.addEventListener('input',()=>saveAll());init();})();
+
+      function setMode(isEdit){
+        editMode=isEdit;
+        grid.querySelectorAll('.note').forEach(n=>{
+          const ta=n.querySelector('textarea'),pv=n.querySelector('.preview');
+          if(isEdit){ ta.style.display='block'; pv.style.display='none'; }
+          else { ta.style.display='none'; pv.style.display='block'; pv.innerHTML=DOMPurify.sanitize(marked.parse(ta.value||'')); adjustNote(n); }
+        });
+      }
+
+      function fits(el){ return el.scrollHeight<=el.clientHeight && el.scrollWidth<=el.clientWidth; }
+
+      function setFontPx(note,px){ note.style.fontSize=px+'px'; }
+      function getCurrentFontPx(note){ return parseFloat(getComputedStyle(note).fontSize)||parseFloat(note.dataset.defaultFontPx)||16; }
+
+      // Adjust font to fit contents; allow growth back up to default when space permits
+      function adjustNote(note){
+        const ta=note.querySelector('textarea');
+        const pv=note.querySelector('.preview');
+        const err=note.querySelector('.error-msg');
+        const minPx = parseInt(minFontInput.value,10) || 4;
+        const defPx = parseFloat(note.dataset.defaultFontPx)||16;
+
+        // Always start from default size before measuring (so content can grow back)
+        setFontPx(note, defPx);
+        // Ensure preview reflects latest text before measuring in preview mode
+        if(pv.style.display==='block') { pv.innerHTML = DOMPurify.sanitize(marked.parse(ta.value||'')); }
+
+        const target = (pv.style.display==='block') ? pv : ta;
+        let low=minPx, high=defPx, best=low; // binary search between min and default
+
+        if(fits(target)) {
+          clearError(note, err);
+          return; // default fits; keep default
+        }
+        // If default doesn't fit, search downwards
+        while(high - low > 0.25){
+          const mid = Math.floor(((low+high)/2)*100)/100; // 0.01 precision
+          setFontPx(note, mid);
+          if(fits(target)) { best = mid; high = mid; }
+          else { low = mid; }
+        }
+        // Apply the best that fits
+        if(fits(target)) { best = Math.min(best, getCurrentFontPx(note)); }
+        setFontPx(note, best);
+
+        if(!fits(target) || best <= minPx+0.01){
+          // Could not fit within threshold
+          note.classList.add('error');
+          const msg = `Content exceeds available space. Minimum font ${minPx}px reached.`;
+          note.title = msg;
+          err.textContent = msg;
+        } else {
+          clearError(note, err);
+        }
+      }
+
+      function clearError(note, err){
+        note.classList.remove('error');
+        note.removeAttribute('title');
+        if(err) err.textContent='';
+      }
+
+      function init(){
+        document.documentElement.style.setProperty('--cols',COLS);
+        document.documentElement.style.setProperty('--rows',ROWS);
+        const vals=loadAll();
+        for(let i=0;i<NOTE_COUNT;i++){ grid.appendChild(createNote(i, vals[i]||'')); }
+        setMode(true); applySettings();
+      }
+
+      modeBtn.addEventListener('click',()=>setMode(!editMode));
+      clearBtn.addEventListener('click',()=>{ if(confirm('Clear all notes?')){ localStorage.removeItem(STORAGE_KEY); grid.querySelectorAll('textarea').forEach(t=>t.value=''); saveAll(); grid.querySelectorAll('.note').forEach(n=>{ setFontPx(n, parseFloat(n.dataset.defaultFontPx)||16 ); clearError(n, n.querySelector('.error-msg')); }); if(!editMode) setMode(false); }});
+      printBtn.addEventListener('click',()=>window.print());
+      [topInput,leftInput,gapXInput,gapYInput,minFontInput].forEach(inp=>inp.addEventListener('input',applySettings));
+      guidesToggle.addEventListener('change',applySettings);
+      document.addEventListener('keydown',e=>{ if(e.altKey&&e.key.toLowerCase()==='e'){ e.preventDefault(); setMode(!editMode); }});
+      grid.addEventListener('input',()=>saveAll());
+      grid.addEventListener('blur', e=>{ const note=e.target && e.target.closest && e.target.closest('.note'); if(note) adjustNote(note); }, true);
+      init();
+    })();
   </script>
 </body>
 </html>
