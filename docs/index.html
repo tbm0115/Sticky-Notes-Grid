@@ -50,7 +50,19 @@
     .note.error .error-msg { display: block; }
 
     /* Feed instruction overlay (hidden normally; shown only in print when guides are on) */
-    #feedMsg { position: absolute; left: 0; right: 0; text-align: center; font: 12pt/1.25 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color: #000; font-weight: 600; display: none; letter-spacing: 0.03em; transform-origin: center; }
+    #feedMsg {
+      position: absolute;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font: 12pt/1.25 "Times New Roman", "Noto Sans Symbols 2", serif;
+      color: #000;
+      font-weight: 600;
+      display: none;
+      letter-spacing: 0.03em;
+      transform-origin: center;
+    }
+    #feedMsg .feed-arrow { display: inline-block; }
 
     @page { size: Letter; margin: 0; }
     @media print {
@@ -140,7 +152,7 @@
         const dir=settings.feedDir||'Up';
         const face = dir==='Up' ? 'up' : 'down';
         const arrow = dir==='Up' ? '˄' : '˅';
-        feedMsg.textContent = `Face this side ${face} and feed ${arrow}`;
+        feedMsg.innerHTML = `Face this side ${face} and feed <span class="feed-arrow" aria-hidden="true">${arrow}</span>`;
         // Positioning
         if(dir==='Up'){
           feedMsg.style.bottom = '0.2in';
@@ -173,7 +185,8 @@
 
       function setMode(isEdit){
         editMode=isEdit;
-        grid.querySelectorAll('.note').forEach(n=>{
+        const notes = grid.querySelectorAll('.note');
+        notes.forEach(n=>{
           const ta=n.querySelector('textarea'),pv=n.querySelector('.preview');
           if(isEdit){
             ta.style.display='block';
@@ -182,12 +195,15 @@
             ta.style.display='none';
             pv.style.display='block';
             pv.innerHTML=DOMPurify.sanitize(marked.parse(ta.value||''));
-            nextFrame(()=>{
-              adjustNoteVisible(n);
-              n.dataset.needsAdjust='';
-            });
+            n.dataset.needsAdjust='1';
           }
         });
+        if(!isEdit){
+          nextFrame(()=>{
+            adjustAllVisible();
+            notes.forEach(n=>{ n.dataset.needsAdjust=''; });
+          });
+        }
       }
 
       function isVisible(el){ return el && getComputedStyle(el).display!=='none' && el.offsetParent!==null; }
