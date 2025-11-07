@@ -97,6 +97,8 @@
         document.body.classList.toggle('print-guides',guidesToggle.checked);
         settings={top:Number(topInput.value),left:Number(leftInput.value),gapX:Number(gapXInput.value),gapY:Number(gapYInput.value),guides:!!guidesToggle.checked,minFontPx:parseInt(minFontInput.value,10)||4};
         localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings));
+        // Re-adjust any visible previews after layout changes
+        requestAnimationFrame(()=>adjustAllVisible());
       }
 
       function createNote(i,text=''){
@@ -107,10 +109,13 @@
         const pv=document.createElement('div'); pv.className='preview';
         const err=document.createElement('div'); err.className='error-msg'; err.setAttribute('aria-live','polite');
         note.append(ta,pv,err);
-        queueMicrotask(()=>{ // capture defaults
-          const cs=getComputedStyle(pv); const px=parseFloat(cs.fontSize)||16; note.dataset.defaultFontPxPreview=String(px);
-        });
-        ta.addEventListener('blur',()=>adjustNote(note));
+        // capture default preview font px once inserted
+        queueMicrotask(()=>{ const cs=getComputedStyle(pv); const px=parseFloat(cs.fontSize)||16; note.dataset.defaultFontPxPreview=String(px); });
+        // mark for adjust when user leaves the cell (we'll wait until preview is visible)
+        ta.addEventListener('blur',()=>{ note.dataset.needsAdjust='1'; });
+        // Observe preview size changes (e.g., window resize) and adjust if visible
+        const ro=new ResizeObserver(()=>{ if(isVisible(pv)) adjustNoteVisible(note); });
+        ro.observe(pv);
         return note;
       }
 
@@ -121,38 +126,44 @@
         editMode=isEdit;
         grid.querySelectorAll('.note').forEach(n=>{
           const ta=n.querySelector('textarea'),pv=n.querySelector('.preview');
-          if(isEdit){ ta.style.display='block'; pv.style.display='none'; }
-          else { ta.style.display='none'; pv.style.display='block'; pv.innerHTML=DOMPurify.sanitize(marked.parse(ta.value||'')); adjustNote(n); }
+          if(isEdit){
+            ta.style.display='block';
+            pv.style.display='none';
+          } else {
+            ta.style.display='none';
+            pv.style.display='block';
+            pv.innerHTML=DOMPurify.sanitize(marked.parse(ta.value||''));
+            // Wait for preview to be laid out, then adjust
+            nextFrame(()=>{
+              adjustNoteVisible(n);
+              n.dataset.needsAdjust='';
+            });
+          }
         });
       }
+
+      function isVisible(el){ return el && getComputedStyle(el).display!=='none' && el.offsetParent!==null; }
+      function nextFrame(cb){ requestAnimationFrame(()=>requestAnimationFrame(cb)); }
 
       function fits(el){ return el.scrollHeight<=el.clientHeight && el.scrollWidth<=el.clientWidth; }
       function setFontPx(el,px){ el.style.fontSize=px+'px'; }
       function getDefaultPreviewPx(note){ return parseFloat(note.dataset.defaultFontPxPreview)||16; }
 
-      // Adjust font on the PREVIEW element only
-      function adjustNote(note){
+      // Adjust font on VISIBLE preview only (assumes pv is visible and laid out)
+      function adjustNoteVisible(note){
         const ta=note.querySelector('textarea');
-        const pv=note.querySelector('.preview');
+        const pv=note.querySelector('preview')||note.querySelector('.preview');
         const err=note.querySelector('.error-msg');
+        if(!isVisible(pv)) return; // must be visible
         const minPx = parseInt(minFontInput.value,10) || 4;
         const defPx = getDefaultPreviewPx(note);
 
-        // Ensure preview has latest markup
+        // Ensure latest markup
         pv.innerHTML = DOMPurify.sanitize(marked.parse(ta.value||''));
 
-        // If preview is hidden (edit mode), temporarily reveal it invisibly to measure/layout
-        const wasHidden = getComputedStyle(pv).display==='none';
-        if(wasHidden){ pv.style.display='block'; pv.style.visibility='hidden'; pv.style.position='absolute'; pv.style.inset='0'; }
-
-        // Reset to default then measure from there (allows growth)
+        // Reset to default then measure (allows growth when space permits)
         setFontPx(pv, defPx);
-
-        if(fits(pv)){
-          clearError(note, err);
-          restoreHidden();
-          return;
-        }
+        if(fits(pv)) { clearError(note, err); return; }
 
         // Binary search downwards
         let low=minPx, high=defPx, best=low;
@@ -166,20 +177,18 @@
         if(!fits(pv) || best <= minPx+0.01){
           note.classList.add('error');
           const msg = `Content exceeds available space. Minimum font ${minPx}px reached.`;
-          note.title = msg;
-          err.textContent = msg;
-        } else {
-          clearError(note, err);
-        }
-
-        restoreHidden();
-
-        function restoreHidden(){
-          if(wasHidden){ pv.style.removeProperty('position'); pv.style.removeProperty('inset'); pv.style.removeProperty('visibility'); pv.style.display='none'; }
-        }
+          note.title = msg; err.textContent = msg;
+        } else { clearError(note, err); }
       }
 
       function clearError(note, err){ note.classList.remove('error'); note.removeAttribute('title'); if(err) err.textContent=''; }
+
+      function adjustAllVisible(){
+        grid.querySelectorAll('.note').forEach(n=>{
+          const pv=n.querySelector('.preview');
+          if(isVisible(pv)) adjustNoteVisible(n);
+        });
+      }
 
       function init(){
         document.documentElement.style.setProperty('--cols',COLS);
@@ -191,12 +200,21 @@
 
       modeBtn.addEventListener('click',()=>setMode(!editMode));
       clearBtn.addEventListener('click',()=>{ if(confirm('Clear all notes?')){ localStorage.removeItem(STORAGE_KEY); grid.querySelectorAll('textarea').forEach(t=>t.value=''); saveAll(); grid.querySelectorAll('.note').forEach(n=>{ const pv=n.querySelector('.preview'); setFontPx(pv, getDefaultPreviewPx(n)); clearError(n, n.querySelector('.error-msg')); }); if(!editMode) setMode(false); }});
-      printBtn.addEventListener('click',()=>window.print());
+      printBtn.addEventListener('click',()=>{ if(editMode) setMode(false); nextFrame(()=>{ adjustAllVisible(); window.print(); }); });
       [topInput,leftInput,gapXInput,gapYInput,minFontInput].forEach(inp=>inp.addEventListener('input',applySettings));
       guidesToggle.addEventListener('change',applySettings);
       document.addEventListener('keydown',e=>{ if(e.altKey&&e.key.toLowerCase()==='e'){ e.preventDefault(); setMode(!editMode); }});
       grid.addEventListener('input',()=>saveAll());
-      grid.addEventListener('blur', e=>{ const note=e.target && e.target.closest && e.target.closest('.note'); if(note) adjustNote(note); }, true);
+      // When a textarea loses focus, mark for adjust; when we next enter Preview, we'll fit it once visible
+      grid.addEventListener('blur', e=>{ const note=e.target && e.target.closest && e.target.closest('.note'); if(note) note.dataset.needsAdjust='1'; }, true);
+
+      // When switching to Preview, also catch any notes marked as needing adjust after they become visible
+      const mo=new MutationObserver(()=>{
+        if(!editMode) nextFrame(()=>{
+          grid.querySelectorAll('.note').forEach(n=>{ if(n.dataset.needsAdjust && isVisible(n.querySelector('.preview'))) { adjustNoteVisible(n); n.dataset.needsAdjust=''; } });
+        });
+      });
+      mo.observe(grid,{subtree:true, attributes:true, attributeFilter:['style','class']});
 
       init();
     })();
