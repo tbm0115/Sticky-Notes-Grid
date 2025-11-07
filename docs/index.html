@@ -50,7 +50,7 @@
     .note.error .error-msg { display: block; }
 
     /* Feed instruction overlay (hidden normally; shown only in print when guides are on) */
-    #feedMsg { position: absolute; left: 0; right: 0; text-align: center; font: 12pt/1.2 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color: #000; display: none; }
+    #feedMsg { position: absolute; left: 0; right: 0; text-align: center; font: 12pt/1.25 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color: #000; font-weight: 600; display: none; letter-spacing: 0.03em; transform-origin: center; }
 
     @page { size: Letter; margin: 0; }
     @media print {
@@ -61,16 +61,16 @@
       .note .preview { display: block !important; }
       .error-msg { display: none !important; }
       /* Stronger grid lines when guides enabled */
-      body.print-guides .note { outline: 1.25pt solid #111 !important; }
+      body.print-guides .note { outline: 1.35pt solid #000 !important; }
       /* Adhesive indicator: 0.5in from top of each cell */
       body.print-guides .note::after {
         content: "";
         position: absolute;
-        left: calc(var(--note-padding) / 2);
-        right: calc(var(--note-padding) / 2);
-        top: 0.5in; /* adhesive line position */
+        left: 0;
+        right: 0;
+        top: max(0.1in, calc(0.5in - var(--note-padding)));
         height: 0;
-        border-top: 1.25pt solid #111;
+        border-top: 1.15pt dashed #000;
         opacity: 0.95;
       }
       /* Feed message only when guides enabled */
@@ -203,27 +203,44 @@
         const pv=note.querySelector('.preview');
         const err=note.querySelector('.error-msg');
         if(!isVisible(pv)) return;
-        const minPx = parseInt(minFontInput.value,10) || 4;
+        const minPx = Math.max(1, parseInt(minFontInput.value,10) || 4);
         const defPx = getDefaultPreviewPx(note);
+        const maxPx = Math.max(defPx, minPx);
 
         // Sync markup
         pv.innerHTML = DOMPurify.sanitize(marked.parse(ta.value||''));
 
         // If default fits, use it and clear error
-        setFontPx(pv, defPx);
+        setFontPx(pv, maxPx);
         if(fits(pv)) { clearError(note, err); return; }
 
-        // Binary search to find the LARGEST size that fits in [minPx, defPx]
-        let low=minPx, high=defPx, best=minPx;
-        for(let i=0;i<20;i++){ // cap iterations
-          const mid = (low + high) / 2;
+        // Binary search to find the largest size that fits between minPx and maxPx
+        let low=minPx, high=maxPx, best=null;
+        for(let i=0;i<30 && high-low>0.05;i++){
+          const mid=(low+high)/2;
           setFontPx(pv, mid);
-          if(fits(pv)) { best = mid; low = mid; } else { high = mid; }
-          if(high - low < 0.1) break; // precision threshold
+          if(fits(pv)) { best=mid; low=mid; }
+          else { high=mid; }
         }
-        setFontPx(pv, Math.max(best, minPx));
 
-        if(!fits(pv) && Math.abs(best - minPx) < 0.11){
+        let finalPx = best!==null ? Math.max(best, minPx) : minPx;
+        setFontPx(pv, finalPx);
+
+        if(best!==null){
+          // Nudge upward in small increments to counter over-shrinking
+          for(let step=0.25; step>=0.1; step/=2){
+            while(finalPx + step <= maxPx){
+              const candidate = Math.min(finalPx + step, maxPx);
+              setFontPx(pv, candidate);
+              if(fits(pv)) { finalPx = candidate; }
+              else { break; }
+            }
+            setFontPx(pv, finalPx);
+          }
+        }
+
+        const fitsNow = fits(pv);
+        if(!fitsNow && finalPx <= minPx + 0.11){
           note.classList.add('error');
           const msg = `Content exceeds available space. Minimum font ${minPx}px reached.`;
           note.title = msg; err.textContent = msg;
@@ -243,7 +260,7 @@
         document.documentElement.style.setProperty('--rows',ROWS);
         const vals=loadAll();
         for(let i=0;i<NOTE_COUNT;i++){ grid.appendChild(createNote(i, vals[i]||'')); }
-        setMode(true); applySettings(); updateFeedMsg();
+        setMode(true); applySettings();
       }
 
       modeBtn.addEventListener('click',()=>setMode(!editMode));
