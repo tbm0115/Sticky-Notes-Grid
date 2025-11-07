@@ -144,8 +144,8 @@
         localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings));
         // Update feed instruction text & position
         updateFeedMsg();
-        // Re-adjust any visible previews after layout changes
-        requestAnimationFrame(()=>adjustAllVisible());
+        // Re-adjust previews after layout changes
+        requestAnimationFrame(()=>adjustAllVisible(!editMode));
       }
 
       function updateFeedMsg(){
@@ -200,7 +200,7 @@
         });
         if(!isEdit){
           nextFrame(()=>{
-            adjustAllVisible();
+            adjustAllVisible(true);
             notes.forEach(n=>{ n.dataset.needsAdjust=''; });
           });
         }
@@ -218,12 +218,12 @@
       function setFontPx(el,px){ el.style.fontSize=px+'px'; }
       function getDefaultPreviewPx(note){ return parseFloat(note.dataset.defaultFontPxPreview)||16; }
 
-      // Largest-fitting binary search on VISIBLE preview
-      function adjustNoteVisible(note){
+      // Largest-fitting binary search on the preview element
+      function adjustNoteVisible(note,{forceVisible=false}={}){
         const ta=note.querySelector('textarea');
         const pv=note.querySelector('.preview');
         const err=note.querySelector('.error-msg');
-        if(!isVisible(pv)) return;
+        if(!forceVisible && !isVisible(pv)) return;
         const minPx = Math.max(1, parseInt(minFontInput.value,10) || 4);
         const defPx = getDefaultPreviewPx(note);
         const maxPx = Math.max(defPx, minPx);
@@ -277,8 +277,8 @@
 
       function clearError(note, err){ note.classList.remove('error'); note.removeAttribute('title'); if(err) err.textContent=''; }
 
-      function adjustAllVisible(){
-        grid.querySelectorAll('.note').forEach(n=>{ const pv=n.querySelector('.preview'); if(isVisible(pv)) adjustNoteVisible(n); });
+      function adjustAllVisible(forceVisible=false){
+        grid.querySelectorAll('.note').forEach(n=>adjustNoteVisible(n,{forceVisible}));
       }
 
       function init(){
@@ -291,14 +291,14 @@
 
       modeBtn.addEventListener('click',()=>setMode(!editMode));
       clearBtn.addEventListener('click',()=>{ if(confirm('Clear all notes?')){ localStorage.removeItem(STORAGE_KEY); grid.querySelectorAll('textarea').forEach(t=>t.value=''); saveAll(); grid.querySelectorAll('.note').forEach(n=>{ const pv=n.querySelector('.preview'); setFontPx(pv, getDefaultPreviewPx(n)); clearError(n, n.querySelector('.error-msg')); }); if(!editMode) setMode(false); }});
-      printBtn.addEventListener('click',()=>{ if(editMode) setMode(false); nextFrame(()=>{ adjustAllVisible(); window.print(); }); });
+      printBtn.addEventListener('click',()=>{ if(editMode) setMode(false); nextFrame(()=>{ adjustAllVisible(true); window.print(); }); });
       [topInput,leftInput,gapXInput,gapYInput,minFontInput,feedDirSel].forEach(inp=>inp.addEventListener('input',applySettings));
       guidesToggle.addEventListener('change',applySettings);
       document.addEventListener('keydown',e=>{ if(e.altKey&&e.key.toLowerCase()==='e'){ e.preventDefault(); setMode(!editMode); }});
       grid.addEventListener('input',()=>saveAll());
       grid.addEventListener('blur', e=>{ const note=e.target && e.target.closest && e.target.closest('.note'); if(note) note.dataset.needsAdjust='1'; }, true);
 
-      const mo=new MutationObserver(()=>{ if(!editMode) nextFrame(()=>{ grid.querySelectorAll('.note').forEach(n=>{ if(n.dataset.needsAdjust && isVisible(n.querySelector('.preview'))) { adjustNoteVisible(n); n.dataset.needsAdjust=''; } }); }); });
+      const mo=new MutationObserver(()=>{ if(!editMode) nextFrame(()=>{ grid.querySelectorAll('.note').forEach(n=>{ if(n.dataset.needsAdjust){ adjustNoteVisible(n,{forceVisible:true}); n.dataset.needsAdjust=''; } }); }); });
       mo.observe(grid,{subtree:true, attributes:true, attributeFilter:['style','class']});
 
       init();
