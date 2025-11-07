@@ -16,7 +16,7 @@
       --margin-left: 0.5in;
       --margin-top: 0.5in;
       --note-padding: 0.18in;
-      --guide-color: #cbd5e1;
+      --guide-color: #94a3b8; /* print guide color */
       --ui-accent: #2563eb;
       --ui-text: #e5e7eb;
       --ui-muted: #9ca3af;
@@ -30,7 +30,7 @@
     .toolbar .left, .toolbar .right { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
     .toolbar h1 { font-size: 1rem; font-weight: 600; margin: 0 0.6rem 0 0; color: #f3f4f6; }
     .toolbar label { font-size: 0.85rem; color: var(--ui-muted); }
-    .toolbar input[type="number"], .toolbar input[type="text"] { background: #0b1220; color: #e5e7eb; border: 1px solid #243142; border-radius: 8px; padding: 0.35rem 0.5rem; outline: none; min-width: 4.5rem; }
+    .toolbar input[type="number"], .toolbar select { background: #0b1220; color: #e5e7eb; border: 1px solid #243142; border-radius: 8px; padding: 0.35rem 0.5rem; outline: none; min-width: 4.5rem; }
     .toolbar input[type="checkbox"] { transform: translateY(1px); }
     .btn { background: var(--ui-accent); color: white; border: none; border-radius: 8px; padding: 0.45rem 0.7rem; font-weight: 600; cursor: pointer; transition: box-shadow 200ms ease, transform 120ms ease; }
     .btn:active { transform: translateY(1px); }
@@ -49,8 +49,33 @@
     .note.error { border: 2px solid #ef4444; background: #fee2e2; }
     .note.error .error-msg { display: block; }
 
+    /* Feed instruction overlay (hidden normally; shown only in print when guides are on) */
+    #feedMsg { position: absolute; left: 0; right: 0; text-align: center; font: 12pt/1.2 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color: #000; display: none; }
+
     @page { size: Letter; margin: 0; }
-    @media print { body { background: white; } .toolbar { display: none !important; } .sheet { width: 8.5in; height: 11in; margin: 0; border: none; border-radius: 0; box-shadow: none; } .note textarea { display: none !important; } .note .preview { display: block !important; } .error-msg { display: none !important; } }
+    @media print {
+      body { background: white; }
+      .toolbar { display: none !important; }
+      .sheet { width: 8.5in; height: 11in; margin: 0; border: none; border-radius: 0; box-shadow: none; }
+      .note textarea { display: none !important; }
+      .note .preview { display: block !important; }
+      .error-msg { display: none !important; }
+      /* Stronger grid lines when guides enabled */
+      body.print-guides .note { outline: 1.25pt solid #111 !important; }
+      /* Adhesive indicator: 0.5in from top of each cell */
+      body.print-guides .note::after {
+        content: "";
+        position: absolute;
+        left: calc(var(--note-padding) / 2);
+        right: calc(var(--note-padding) / 2);
+        top: 0.5in; /* adhesive line position */
+        height: 0;
+        border-top: 1.25pt solid #111;
+        opacity: 0.95;
+      }
+      /* Feed message only when guides enabled */
+      body.print-guides #feedMsg { display: block; }
+    }
   </style>
 </head>
 <body>
@@ -62,6 +87,12 @@
       <label>Gap X <input id="gapXInput" type="number" step="0.01" min="0" value="0.25"></label>
       <label>Gap Y <input id="gapYInput" type="number" step="0.01" min="0" value="0.50"></label>
       <label>Min font (px) <input id="minFontInput" type="number" step="1" min="3" value="4"></label>
+      <label>Feed direction
+        <select id="feedDir">
+          <option value="Up" selected>Up</option>
+          <option value="Down">Down</option>
+        </select>
+      </label>
       <label><input id="guidesToggle" type="checkbox"> Show print guides</label>
     </div>
     <div class="right">
@@ -73,6 +104,7 @@
 
   <main class="sheet">
     <section id="grid" class="grid"></section>
+    <div id="feedMsg" aria-hidden="true"></div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -81,13 +113,14 @@
     (function(){
       const COLS=2,ROWS=3,NOTE_COUNT=COLS*ROWS,STORAGE_KEY='sticky-notes-v1',SETTINGS_KEY='sticky-notes-settings-v1';
       const grid=document.getElementById('grid'),modeBtn=document.getElementById('modeBtn'),clearBtn=document.getElementById('clearBtn'),printBtn=document.getElementById('printBtn');
-      const topInput=document.getElementById('topInput'),leftInput=document.getElementById('leftInput'),gapXInput=document.getElementById('gapXInput'),gapYInput=document.getElementById('gapYInput'),guidesToggle=document.getElementById('guidesToggle'),minFontInput=document.getElementById('minFontInput');
+      const topInput=document.getElementById('topInput'),leftInput=document.getElementById('leftInput'),gapXInput=document.getElementById('gapXInput'),gapYInput=document.getElementById('gapYInput'),guidesToggle=document.getElementById('guidesToggle'),minFontInput=document.getElementById('minFontInput'),feedDirSel=document.getElementById('feedDir');
+      const feedMsg=document.getElementById('feedMsg');
       let editMode=true;
 
-      const defaultSettings={top:0.5,left:0.5,gapX:0.25,gapY:0.5,guides:false,minFontPx:4};
+      const defaultSettings={top:0.5,left:0.5,gapX:0.25,gapY:0.5,guides:false,minFontPx:4,feedDir:'Up'};
       let settings={...defaultSettings};
       try{const saved=JSON.parse(localStorage.getItem(SETTINGS_KEY)); if(saved) settings={...settings,...saved};}catch{}
-      topInput.value=settings.top; leftInput.value=settings.left; gapXInput.value=settings.gapX; gapYInput.value=settings.gapY; guidesToggle.checked=!!settings.guides; minFontInput.value=settings.minFontPx;
+      topInput.value=settings.top; leftInput.value=settings.left; gapXInput.value=settings.gapX; gapYInput.value=settings.gapY; guidesToggle.checked=!!settings.guides; minFontInput.value=settings.minFontPx; feedDirSel.value=settings.feedDir;
 
       function applySettings(){
         document.documentElement.style.setProperty('--margin-top',Number(topInput.value)+'in');
@@ -95,10 +128,29 @@
         document.documentElement.style.setProperty('--gap-x',Number(gapXInput.value)+'in');
         document.documentElement.style.setProperty('--gap-y',Number(gapYInput.value)+'in');
         document.body.classList.toggle('print-guides',guidesToggle.checked);
-        settings={top:Number(topInput.value),left:Number(leftInput.value),gapX:Number(gapXInput.value),gapY:Number(gapYInput.value),guides:!!guidesToggle.checked,minFontPx:parseInt(minFontInput.value,10)||4};
+        settings={top:Number(topInput.value),left:Number(leftInput.value),gapX:Number(gapXInput.value),gapY:Number(gapYInput.value),guides:!!guidesToggle.checked,minFontPx:parseInt(minFontInput.value,10)||4,feedDir:feedDirSel.value};
         localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings));
+        // Update feed instruction text & position
+        updateFeedMsg();
         // Re-adjust any visible previews after layout changes
         requestAnimationFrame(()=>adjustAllVisible());
+      }
+
+      function updateFeedMsg(){
+        const dir=settings.feedDir||'Up';
+        const face = dir==='Up' ? 'up' : 'down';
+        const arrow = dir==='Up' ? '˄' : '˅';
+        feedMsg.textContent = `Face this side ${face} and feed ${arrow}`;
+        // Positioning
+        if(dir==='Up'){
+          feedMsg.style.bottom = '0.2in';
+          feedMsg.style.top = '';
+          feedMsg.style.transform = 'none';
+        } else {
+          feedMsg.style.top = '0.2in';
+          feedMsg.style.bottom = '';
+          feedMsg.style.transform = 'rotate(180deg)';
+        }
       }
 
       function createNote(i,text=''){
@@ -109,11 +161,8 @@
         const pv=document.createElement('div'); pv.className='preview';
         const err=document.createElement('div'); err.className='error-msg'; err.setAttribute('aria-live','polite');
         note.append(ta,pv,err);
-        // capture default preview font px once inserted
         queueMicrotask(()=>{ const cs=getComputedStyle(pv); const px=parseFloat(cs.fontSize)||16; note.dataset.defaultFontPxPreview=String(px); });
-        // mark for adjust when user leaves the cell (we'll wait until preview is visible)
         ta.addEventListener('blur',()=>{ note.dataset.needsAdjust='1'; });
-        // Observe preview size changes (e.g., window resize) and adjust if visible
         const ro=new ResizeObserver(()=>{ if(isVisible(pv)) adjustNoteVisible(note); });
         ro.observe(pv);
         return note;
@@ -133,7 +182,6 @@
             ta.style.display='none';
             pv.style.display='block';
             pv.innerHTML=DOMPurify.sanitize(marked.parse(ta.value||''));
-            // Wait for preview to be laid out, then adjust
             nextFrame(()=>{
               adjustNoteVisible(n);
               n.dataset.needsAdjust='';
@@ -149,45 +197,45 @@
       function setFontPx(el,px){ el.style.fontSize=px+'px'; }
       function getDefaultPreviewPx(note){ return parseFloat(note.dataset.defaultFontPxPreview)||16; }
 
-      // Adjust font on VISIBLE preview only (assumes pv is visible and laid out)
+      // Largest-fitting binary search on VISIBLE preview
       function adjustNoteVisible(note){
         const ta=note.querySelector('textarea');
-        const pv=note.querySelector('preview')||note.querySelector('.preview');
+        const pv=note.querySelector('.preview');
         const err=note.querySelector('.error-msg');
-        if(!isVisible(pv)) return; // must be visible
+        if(!isVisible(pv)) return;
         const minPx = parseInt(minFontInput.value,10) || 4;
         const defPx = getDefaultPreviewPx(note);
 
-        // Ensure latest markup
+        // Sync markup
         pv.innerHTML = DOMPurify.sanitize(marked.parse(ta.value||''));
 
-        // Reset to default then measure (allows growth when space permits)
+        // If default fits, use it and clear error
         setFontPx(pv, defPx);
         if(fits(pv)) { clearError(note, err); return; }
 
-        // Binary search downwards
-        let low=minPx, high=defPx, best=low;
-        while(high - low > 0.25){
-          const mid = Math.floor(((low+high)/2)*100)/100;
+        // Binary search to find the LARGEST size that fits in [minPx, defPx]
+        let low=minPx, high=defPx, best=minPx;
+        for(let i=0;i<20;i++){ // cap iterations
+          const mid = (low + high) / 2;
           setFontPx(pv, mid);
-          if(fits(pv)){ best=mid; high=mid; } else { low=mid; }
+          if(fits(pv)) { best = mid; low = mid; } else { high = mid; }
+          if(high - low < 0.1) break; // precision threshold
         }
-        setFontPx(pv, best);
+        setFontPx(pv, Math.max(best, minPx));
 
-        if(!fits(pv) || best <= minPx+0.01){
+        if(!fits(pv) && Math.abs(best - minPx) < 0.11){
           note.classList.add('error');
           const msg = `Content exceeds available space. Minimum font ${minPx}px reached.`;
           note.title = msg; err.textContent = msg;
-        } else { clearError(note, err); }
+        } else {
+          clearError(note, err);
+        }
       }
 
       function clearError(note, err){ note.classList.remove('error'); note.removeAttribute('title'); if(err) err.textContent=''; }
 
       function adjustAllVisible(){
-        grid.querySelectorAll('.note').forEach(n=>{
-          const pv=n.querySelector('.preview');
-          if(isVisible(pv)) adjustNoteVisible(n);
-        });
+        grid.querySelectorAll('.note').forEach(n=>{ const pv=n.querySelector('.preview'); if(isVisible(pv)) adjustNoteVisible(n); });
       }
 
       function init(){
@@ -195,25 +243,19 @@
         document.documentElement.style.setProperty('--rows',ROWS);
         const vals=loadAll();
         for(let i=0;i<NOTE_COUNT;i++){ grid.appendChild(createNote(i, vals[i]||'')); }
-        setMode(true); applySettings();
+        setMode(true); applySettings(); updateFeedMsg();
       }
 
       modeBtn.addEventListener('click',()=>setMode(!editMode));
       clearBtn.addEventListener('click',()=>{ if(confirm('Clear all notes?')){ localStorage.removeItem(STORAGE_KEY); grid.querySelectorAll('textarea').forEach(t=>t.value=''); saveAll(); grid.querySelectorAll('.note').forEach(n=>{ const pv=n.querySelector('.preview'); setFontPx(pv, getDefaultPreviewPx(n)); clearError(n, n.querySelector('.error-msg')); }); if(!editMode) setMode(false); }});
       printBtn.addEventListener('click',()=>{ if(editMode) setMode(false); nextFrame(()=>{ adjustAllVisible(); window.print(); }); });
-      [topInput,leftInput,gapXInput,gapYInput,minFontInput].forEach(inp=>inp.addEventListener('input',applySettings));
+      [topInput,leftInput,gapXInput,gapYInput,minFontInput,feedDirSel].forEach(inp=>inp.addEventListener('input',applySettings));
       guidesToggle.addEventListener('change',applySettings);
       document.addEventListener('keydown',e=>{ if(e.altKey&&e.key.toLowerCase()==='e'){ e.preventDefault(); setMode(!editMode); }});
       grid.addEventListener('input',()=>saveAll());
-      // When a textarea loses focus, mark for adjust; when we next enter Preview, we'll fit it once visible
       grid.addEventListener('blur', e=>{ const note=e.target && e.target.closest && e.target.closest('.note'); if(note) note.dataset.needsAdjust='1'; }, true);
 
-      // When switching to Preview, also catch any notes marked as needing adjust after they become visible
-      const mo=new MutationObserver(()=>{
-        if(!editMode) nextFrame(()=>{
-          grid.querySelectorAll('.note').forEach(n=>{ if(n.dataset.needsAdjust && isVisible(n.querySelector('.preview'))) { adjustNoteVisible(n); n.dataset.needsAdjust=''; } });
-        });
-      });
+      const mo=new MutationObserver(()=>{ if(!editMode) nextFrame(()=>{ grid.querySelectorAll('.note').forEach(n=>{ if(n.dataset.needsAdjust && isVisible(n.querySelector('.preview'))) { adjustNoteVisible(n); n.dataset.needsAdjust=''; } }); }); });
       mo.observe(grid,{subtree:true, attributes:true, attributeFilter:['style','class']});
 
       init();
