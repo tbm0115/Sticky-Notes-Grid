@@ -256,10 +256,14 @@
         }
 
         const fitsNow = fits(pv);
-        if(!fitsNow && finalPx <= minPx + 0.11){
+        if(!fitsNow){
           note.classList.add('error');
-          const msg = `Content exceeds available space. Minimum font ${minPx}px reached.`;
-          note.title = msg; err.textContent = msg;
+          const suffix = finalPx <= minPx + 0.11
+            ? ` Minimum font ${minPx}px reached.`
+            : '';
+          const msg = `Content exceeds available space.${suffix}`;
+          note.title = msg;
+          err.textContent = msg;
         } else {
           clearError(note, err);
         }
