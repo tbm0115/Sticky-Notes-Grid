@@ -206,7 +206,12 @@
         }
       }
 
-      function isVisible(el){ return el && getComputedStyle(el).display!=='none' && el.offsetParent!==null; }
+      function isVisible(el){
+        if(!el) return false;
+        const style = getComputedStyle(el);
+        if(style.display==='none' || style.visibility==='hidden') return false;
+        return el.getClientRects().length>0;
+      }
       function nextFrame(cb){ requestAnimationFrame(()=>requestAnimationFrame(cb)); }
 
       function fits(el){ return el.scrollHeight<=el.clientHeight && el.scrollWidth<=el.clientWidth; }
@@ -256,15 +261,16 @@
         }
 
         const fitsNow = fits(pv);
-        if(!fitsNow){
+        const hitLowerBound = best===null && !fitsNow;
+        if(hitLowerBound){
           note.classList.add('error');
-          const suffix = finalPx <= minPx + 0.11
-            ? ` Minimum font ${minPx}px reached.`
-            : '';
-          const msg = `Content exceeds available space.${suffix}`;
+          const msg = `Content exceeds available space. Minimum font ${minPx}px reached.`;
           note.title = msg;
           err.textContent = msg;
         } else {
+          if(!fitsNow && best!==null){
+            setFontPx(pv, Math.max(best, minPx));
+          }
           clearError(note, err);
         }
       }
